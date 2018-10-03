@@ -45,6 +45,9 @@ void tr_torrentInitFileDLs(tr_torrent* tor, tr_file_index_t const* files, tr_fil
 
 void tr_torrentSetLabels(tr_torrent* tor, tr_ptrArray* labels);
 
+/* just like tr_torrentSetPieceDLs but doesn't trigger a fastresume save */
+void tr_torrentInitPieceDLs(tr_torrent* tor, tr_piece_index_t const* pieces, tr_piece_index_t pieceCount, bool doDownload);
+
 void tr_torrentRecheckCompleteness(tr_torrent*);
 
 void tr_torrentSetHasPiece(tr_torrent* tor, tr_piece_index_t pieceIndex, bool has);

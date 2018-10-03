@@ -1190,6 +1190,19 @@ tr_priority_t* tr_torrentGetFilePriorities(tr_torrent const* torrent);
 /** @brief Set a batch of files to be downloaded or not. */
 void tr_torrentSetFileDLs(tr_torrent* torrent, tr_file_index_t const* files, tr_file_index_t fileCount, bool do_download);
 
+/**
+ * @brief Set individual piece priorities
+ *
+ * @param pieces a list of piece indexes
+ * @param priorities a list of priorities, one for each entry in the pieces array
+ * @param n the length of the arrays
+ */
+void tr_torrentSetPiecePriorities(tr_torrent* tor, tr_piece_index_t const* pieces, const tr_priority_t* priorities,
+    tr_piece_index_t n);
+
+/** @brief Set a batch of pieces to be downloaded or not. */
+void tr_torrentSetPieceDLs(tr_torrent* torrent, tr_piece_index_t const* pieces, tr_piece_index_t pieceCount, bool do_download);
+
 tr_info const* tr_torrentInfo(tr_torrent const* torrent);
 
 /* Raw function to change the torrent's downloadDir field.
@@ -1573,7 +1586,7 @@ typedef struct tr_file
 {
     uint64_t length; /* Length of the file, in bytes */
     char* name; /* Path to the file */
-    int8_t priority; /* TR_PRI_HIGH, _NORMAL, or _LOW */
+    tr_priority_t priority; /* TR_PRI_HIGH, _NORMAL, or _LOW */
     int8_t dnd; /* "do not download" flag */
     int8_t is_renamed; /* true if we're using a different path from the one in the metainfo; ie, if the user has renamed it */
     tr_piece_index_t firstPiece; /* We need pieces [firstPiece... */
@@ -1587,7 +1600,7 @@ typedef struct tr_piece
 {
     time_t timeChecked; /* the last time we tested this piece */
     uint8_t hash[SHA_DIGEST_LENGTH]; /* pieces hash */
-    int8_t priority; /* TR_PRI_HIGH, _NORMAL, or _LOW */
+    tr_priority_t priority; /* TR_PRI_HIGH, _NORMAL, or _LOW */
     int8_t dnd; /* "do not download" flag */
 }
 tr_piece;

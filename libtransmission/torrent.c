@@ -2544,6 +2544,63 @@ void tr_torrentSetLabels(tr_torrent* tor, tr_ptrArray* labels)
     tr_torrentUnlock(tor);
 }
 
+void tr_torrentInitPieceDLs(tr_torrent* tor, tr_piece_index_t const* pieces, tr_piece_index_t pieceCount, bool doDownload)
+{
+    TR_ASSERT(tr_isTorrent(tor));
+
+    tr_torrentLock(tor);
+
+    for (tr_piece_index_t i = 0; i < pieceCount; i++)
+    {
+        if (pieces[i] < tor->info.pieceCount)
+        {
+            tor->info.pieces[pieces[i]].dnd = !doDownload;
+        }
+    }
+
+    tr_cpInvalidateDND(&tor->completion);
+
+    tr_torrentUnlock(tor);
+}
+
+void tr_torrentSetPieceDLs(tr_torrent* tor, tr_piece_index_t const* pieces, tr_piece_index_t pieceCount, bool doDownload)
+{
+    TR_ASSERT(tr_isTorrent(tor));
+
+    tr_torrentLock(tor);
+
+    tr_torrentInitPieceDLs(tor, pieces, pieceCount, doDownload);
+    tr_torrentSetDirty(tor);
+    tr_torrentRecheckCompleteness(tor);
+    tr_peerMgrRebuildRequests(tor);
+
+    tr_torrentUnlock(tor);
+}
+
+/***
+****
+***/
+
+void tr_torrentSetPiecePriorities(tr_torrent* tor, tr_piece_index_t const* pieces, const tr_priority_t* priorities,
+    tr_piece_index_t n)
+{
+    TR_ASSERT(tr_isTorrent(tor));
+
+    tr_torrentLock(tor);
+
+    for (tr_piece_index_t i = 0; i < n; i++)
+    {
+        if (pieces[i] < tor->info.pieceCount)
+        {
+            tor->info.pieces[pieces[i]].priority = priorities[i];
+        }
+    }
+
+    tr_peerMgrRebuildRequests(tor);
+
+    tr_torrentUnlock(tor);
+}
+
 /***
 ****
 ***/

@@ -728,6 +728,47 @@ static void addField(tr_torrent* const tor, tr_info const* const inf, tr_stat co
 
         break;
 
+    case TR_KEY_piece_priorities:
+        {
+            tr_variant* p = tr_variantDictAddList(d, key, inf->pieceCount);
+
+            for (tr_piece_index_t i = 0; i < inf->pieceCount; ++i)
+            {
+                tr_variantListAddInt(p, inf->pieces[i].priority);
+            }
+        }
+        break;
+
+    case TR_KEY_piece_get:
+        if (tr_torrentHasMetadata(tor))
+        {
+            void* raw;
+            size_t raw_byte_count = 0;
+            tr_bitfield piece_get_bitfield;
+            char* str;
+
+            tr_bitfieldConstruct(&piece_get_bitfield, inf->pieceCount);
+            for (tr_piece_index_t i = 0; i < inf->pieceCount; i++)
+            {
+                if (!inf->pieces[i].dnd)
+                {
+                    tr_bitfieldAdd(&piece_get_bitfield, i);
+                }
+            }
+
+            raw = tr_bitfieldGetRaw(&piece_get_bitfield, &raw_byte_count);
+            tr_bitfieldDestruct(&piece_get_bitfield);
+            str = tr_base64_encode(raw, raw_byte_count, NULL);
+            tr_free(raw);
+            tr_variantDictAddStr(d, key, str != NULL ? str : "");
+            tr_free(str);
+        }
+        else
+        {
+            tr_variantDictAddStr(d, key, "");
+        }
+        break;
+
     case TR_KEY_pieceCount:
         tr_variantDictAddInt(d, key, inf->pieceCount);
         break;
@@ -1049,6 +1090,119 @@ static char const* setFilePriorities(tr_torrent* tor, int priority, tr_variant* 
     return errmsg;
 }
 
+static char const* dictGetSparseList(tr_variant* d, int64_t** setme_indexes, int64_t** setme_values, size_t* setme_count)
+{
+    tr_variant* indexes;
+    tr_variant* values;
+
+    *setme_indexes = NULL;
+    *setme_values = NULL;
+    *setme_count = 0;
+
+    if (!tr_variantDictFindList(d, TR_KEY_indexes, &indexes))
+    {
+        return "bad sparse list: no indexes";
+    }
+
+    if (!tr_variantDictFindList(d, TR_KEY_values, &values))
+    {
+        return "bad sparse list: no values";
+    }
+
+    size_t nk = tr_variantListSize(indexes);
+    size_t nv = tr_variantListSize(values);
+    size_t n = nk > nv ? nv : nk;
+
+    if (n == 0)
+    {
+        return NULL;
+    }
+
+    *setme_indexes = tr_new0(int64_t, n);
+    *setme_values = tr_new0(int64_t, n);
+
+    for (size_t i = 0; i < n; i++)
+    {
+        tr_variant* k = tr_variantListChild(indexes, i);
+        tr_variant* v = tr_variantListChild(values, i);
+
+        if (!k || !v)
+        {
+            continue;
+        }
+
+        if (!tr_variantGetInt(k, *setme_indexes + *setme_count))
+        {
+            continue;
+        }
+
+        if (!tr_variantGetInt(v, *setme_values + *setme_count))
+        {
+            continue;
+        }
+
+        (*setme_count)++;
+    }
+
+    if (*setme_count == 0)
+    {
+        tr_free(*setme_indexes);
+        tr_free(*setme_values);
+        *setme_indexes = NULL;
+        *setme_values = NULL;
+    }
+
+    return NULL;
+}
+
+static char const* setPiecePriorities(tr_torrent* tor, tr_variant* d)
+{
+    int64_t* indexes;
+    int64_t* values;
+    size_t n;
+    tr_piece_index_t* pieces;
+    tr_priority_t* priorities;
+    size_t count = 0;
+    char const* errmsg = NULL;
+
+    errmsg = dictGetSparseList(d, &indexes, &values, &n);
+
+    if ((errmsg != NULL) || (n == 0))
+    {
+        return errmsg;
+    }
+
+    pieces = tr_new0(tr_piece_index_t, n);
+    priorities = tr_new0(tr_priority_t, n);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        pieces[i] = indexes[i];
+        priorities[i] = values[i];
+
+        if (pieces[i] < tor->info.pieceCount)
+        {
+            count++;
+        }
+        else
+        {
+            errmsg = "piece index out of range";
+        }
+    }
+
+    tr_free(indexes);
+    tr_free(values);
+
+    if (count)
+    {
+        tr_torrentSetPiecePriorities(tor, pieces, priorities, count);
+    }
+
+    tr_free(pieces);
+    tr_free(priorities);
+    return errmsg;
+}
+
 static char const* setFileDLs(tr_torrent* tor, bool do_download, tr_variant* list)
 {
     int64_t tmp;
@@ -1088,6 +1242,48 @@ static char const* setFileDLs(tr_torrent* tor, bool do_download, tr_variant* lis
     }
 
     tr_free(files);
+    return errmsg;
+}
+
+static char const* setPieceDLs(tr_torrent* tor, bool do_download, tr_variant* list)
+{
+    int64_t tmp;
+    int pieceCount = 0;
+    int const n = tr_variantListSize(list);
+    char const* errmsg = NULL;
+    tr_piece_index_t* pieces = tr_new0(tr_piece_index_t, tor->info.pieceCount);
+
+    if (n != 0) /* if argument list, process them */
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            if (tr_variantGetInt(tr_variantListChild(list, i), &tmp))
+            {
+                if (0 <= tmp && tmp < tor->info.pieceCount)
+                {
+                    pieces[pieceCount++] = tmp;
+                }
+                else
+                {
+                    errmsg = "piece index out of range";
+                }
+            }
+        }
+    }
+    else /* if empty set, apply to all */
+    {
+        for (tr_piece_index_t t = 0; t < tor->info.pieceCount; ++t)
+        {
+            pieces[pieceCount++] = t;
+        }
+    }
+
+    if (pieceCount)
+    {
+        tr_torrentSetPieceDLs(tor, pieces, pieceCount, do_download);
+    }
+
+    tr_free(pieces);
     return errmsg;
 }
 
@@ -1354,6 +1550,21 @@ static char const* torrentSet(tr_session* session, tr_variant* args_in, tr_varia
         if (errmsg == NULL && tr_variantDictFindList(args_in, TR_KEY_priority_normal, &tmp_variant))
         {
             errmsg = setFilePriorities(tor, TR_PRI_NORMAL, tmp_variant);
+        }
+
+        if (errmsg == NULL && tr_variantDictFindDict(args_in, TR_KEY_piece_priorities, &tmp_variant))
+        {
+            errmsg = setPiecePriorities(tor, tmp_variant);
+        }
+
+        if (errmsg == NULL && tr_variantDictFindList(args_in, TR_KEY_pieces_unwanted, &tmp_variant))
+        {
+            errmsg = setPieceDLs(tor, false, tmp_variant);
+        }
+
+        if (errmsg == NULL && tr_variantDictFindList(args_in, TR_KEY_pieces_wanted, &tmp_variant))
+        {
+            errmsg = setPieceDLs(tor, true, tmp_variant);
         }
 
         if (tr_variantDictFindInt(args_in, TR_KEY_downloadLimit, &tmp))

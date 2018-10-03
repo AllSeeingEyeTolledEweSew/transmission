@@ -161,6 +161,12 @@ static void saveDND(tr_variant* dict, tr_torrent const* tor)
     {
         tr_variantListAddInt(list, inf->files[i].dnd ? 1 : 0);
     }
+
+    list = tr_variantDictAddList(dict, TR_KEY_piece_get, inf->pieceCount);
+    for (tr_piece_index_t i = 0; i < inf->pieceCount; i++)
+    {
+        tr_variantListAddInt(list, inf->pieces[i].dnd ? 0 : 1);
+    }
 }
 
 static uint64_t loadDND(tr_variant* dict, tr_torrent* tor)
@@ -211,6 +217,43 @@ static uint64_t loadDND(tr_variant* dict, tr_torrent* tor)
             tr_variantListSize(list), (int)n);
     }
 
+    if (tr_variantDictFindList(dict, TR_KEY_piece_get, &list) && tr_variantListSize(list) == tor->info.pieceCount)
+    {
+        int64_t tmp;
+        tr_piece_index_t* dl = tr_new(tr_piece_index_t, n);
+        tr_piece_index_t* dnd = tr_new(tr_piece_index_t, n);
+        tr_piece_index_t dlCount = 0;
+        tr_piece_index_t dndCount = 0;
+
+        for (tr_piece_index_t i = 0; i < n; ++i)
+        {
+            if (tr_variantGetInt(tr_variantListChild(list, i), &tmp) && tmp == 0)
+            {
+                dnd[dndCount++] = i;
+            }
+            else
+            {
+                dl[dlCount++] = i;
+            }
+        }
+
+        if (dndCount != 0)
+        {
+            tr_torrentInitPieceDLs(tor, dnd, dndCount, false);
+            tr_logAddTorDbg(tor, "Resume file found %d pieces listed as dnd", dndCount);
+        }
+
+        if (dlCount != 0)
+        {
+            tr_torrentInitPieceDLs(tor, dl, dlCount, true);
+            tr_logAddTorDbg(tor, "Resume file found %d pieces marked for download", dlCount);
+        }
+
+        tr_free(dnd);
+        tr_free(dl);
+        ret = TR_FR_DND;
+    }
+
     return ret;
 }
 
@@ -232,7 +275,21 @@ static void saveFilePriorities(tr_variant* dict, tr_torrent const* tor)
     }
 }
 
-static uint64_t loadFilePriorities(tr_variant* dict, tr_torrent* tor)
+static void savePiecePriorities(tr_variant* dict, tr_torrent const* tor)
+{
+    tr_variant* list;
+    tr_info const* const inf = tr_torrentInfo(tor);
+    tr_piece_index_t const n = inf->pieceCount;
+
+    list = tr_variantDictAddList(dict, TR_KEY_piece_priorities, n);
+
+    for (tr_piece_index_t i = 0; i < n; ++i)
+    {
+        tr_variantListAddInt(list, inf->pieces[i].priority);
+    }
+}
+
+static uint64_t loadPriorities(tr_variant* dict, tr_torrent* tor)
 {
     tr_variant* list;
     uint64_t ret = 0;
@@ -247,6 +304,21 @@ static uint64_t loadFilePriorities(tr_variant* dict, tr_torrent* tor)
             if (tr_variantGetInt(tr_variantListChild(list, i), &priority))
             {
                 tr_torrentInitFilePriority(tor, i, priority);
+            }
+        }
+
+        ret = TR_FR_FILE_PRIORITIES;
+    }
+
+    if (tr_variantDictFindList(dict, TR_KEY_piece_priorities, &list) && tr_variantListSize(list) == tor->info.pieceCount)
+    {
+        int64_t priority;
+
+        for (tr_piece_index_t i = 0; i < n; ++i)
+        {
+            if (tr_variantGetInt(tr_variantListChild(list, i), &priority))
+            {
+                tor->info.pieces[i].priority = (int8_t)priority;
             }
         }
 
@@ -764,6 +836,7 @@ void tr_torrentSaveResume(tr_torrent* tor)
     if (tr_torrentHasMetadata(tor))
     {
         saveFilePriorities(&top, tor);
+        savePiecePriorities(&top, tor);
         saveDND(&top, tor);
         saveProgress(&top, tor);
     }
@@ -944,7 +1017,7 @@ static uint64_t loadFromFile(tr_torrent* tor, uint64_t fieldsToLoad, bool* didRe
 
     if ((fieldsToLoad & TR_FR_FILE_PRIORITIES) != 0)
     {
-        fieldsLoaded |= loadFilePriorities(&top, tor);
+        fieldsLoaded |= loadPriorities(&top, tor);
     }
 
     if ((fieldsToLoad & TR_FR_PROGRESS) != 0)
