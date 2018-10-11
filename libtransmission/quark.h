@@ -244,6 +244,7 @@ enum
     TR_KEY_piece,
     TR_KEY_piece_length,
     TR_KEY_piece_get,
+    TR_KEY_piece_max_requests_per_block,
     TR_KEY_piece_priorities,
     TR_KEY_pieceCount,
     TR_KEY_pieceSize,

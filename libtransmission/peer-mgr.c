@@ -171,6 +171,7 @@ struct weighted_piece
     tr_piece_index_t index;
     int16_t salt;
     int16_t requestCount;
+    int8_t maxRequestsPerBlock;
 };
 
 enum piece_sort_state
@@ -218,11 +219,14 @@ typedef struct tr_swarm
     int maxPeers;
     time_t lastCancel;
 
+    /* are we in the endgame? */
+    int endgame;
+
     /* Before the endgame this should be 0. In endgame, is contains the average
      * number of pending requests per peer. Only peers which have more pending
      * requests are considered 'fast' are allowed to request a block that's
      * already been requested from another (slower?) peer. */
-    int endgame;
+    int avgRequestsPerDownloadingPeer;
 }
 tr_swarm;
 
@@ -843,36 +847,31 @@ static bool testForEndgame(tr_swarm const* s)
     return (uint64_t)s->requestCount * s->tor->blockSize >= tr_torrentGetLeftUntilDone(s->tor);
 }
 
-static void updateEndgame(tr_swarm* s)
+static void updateBlockRequestStats(tr_swarm* s)
 {
+    int numDownloading = 0;
     TR_ASSERT(s->requestCount >= 0);
 
-    if (!testForEndgame(s))
-    {
-        /* not in endgame */
-        s->endgame = 0;
-    }
-    else if (s->endgame == 0) /* only recalculate when endgame first begins */
-    {
-        int numDownloading = 0;
+    /* if we'll issue multiple requests per block, get the average number of
+     * requests per downloading peer */
+    s->endgame = testForEndgame(s);
 
-        /* add the active bittorrent peers... */
-        for (int i = 0, n = tr_ptrArraySize(&s->peers); i < n; ++i)
+    /* add the active bittorrent peers... */
+    for (int i = 0, n = tr_ptrArraySize(&s->peers); i < n; ++i)
+    {
+        tr_peer const* p = tr_ptrArrayNth(&s->peers, i);
+
+        if (p->pendingReqsToPeer > 0)
         {
-            tr_peer const* p = tr_ptrArrayNth(&s->peers, i);
-
-            if (p->pendingReqsToPeer > 0)
-            {
-                ++numDownloading;
-            }
+            ++numDownloading;
         }
-
-        /* add the active webseeds... */
-        numDownloading += countActiveWebseeds(s);
-
-        /* average number of pending requests per downloading peer */
-        s->endgame = s->requestCount / MAX(numDownloading, 1);
     }
+
+    /* add the active webseeds... */
+    numDownloading += countActiveWebseeds(s);
+
+    /* average number of pending requests per downloading peer */
+    s->avgRequestsPerDownloadingPeer = s->requestCount / MAX(numDownloading, 1);
 }
 
 /****
@@ -1113,6 +1112,7 @@ static void pieceListRebuild(tr_swarm* s)
             piece->index = pool[i];
             piece->requestCount = 0;
             piece->salt = tr_rand_int_weak(4096);
+            piece->maxRequestsPerBlock = inf->pieces[i].maxRequestsPerBlock;
         }
 
         /* if we already had a list of pieces, merge it into
@@ -1368,7 +1368,7 @@ void tr_peerMgrGetNextRequests(tr_torrent* tor, tr_peer* peer, int numwant, tr_b
     assertReplicationCountIsExact(s);
     assertWeightedPiecesAreSorted(s);
 
-    updateEndgame(s);
+    updateBlockRequestStats(s);
 
     struct weighted_piece* pieces = s->pieces;
     int got = 0;
@@ -1406,28 +1406,48 @@ void tr_peerMgrGetNextRequests(tr_torrent* tor, tr_peer* peer, int numwant, tr_b
 
                 if (peerCount != 0)
                 {
-                    /* don't make a second block request until the endgame */
-                    if (s->endgame == 0)
+                    int maxRequestsPerBlock;
+
+                    if (p->maxRequestsPerBlock)
                     {
-                        continue;
+                        maxRequestsPerBlock = p->maxRequestsPerBlock;
+                    }
+                    else if (s->endgame)
+                    {
+                        maxRequestsPerBlock = 2;
+                    }
+                    else
+                    {
+                        maxRequestsPerBlock = 1;
                     }
 
-                    /* don't have more than two peers requesting this block */
-                    if (peerCount > 1)
+                    /* limit the peers requesting this block */
+                    if (peerCount > maxRequestsPerBlock)
                     {
                         continue;
                     }
 
                     /* don't send the same request to the same peer twice */
-                    if (peer == peers[0])
                     {
-                        continue;
+                        bool found = false;
+                        for (int j = 0; j < peerCount; j++)
+                        {
+                            if (peer == peers[j])
+                            {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (found)
+                        {
+                            continue;
+                        }
                     }
 
                     /* in the endgame allow an additional peer to download a
                        block but only if the peer seems to be handling requests
                        relatively fast */
-                    if (peer->pendingReqsToPeer + numwant - got < s->endgame)
+                    if (peer->pendingReqsToPeer + numwant - got < s->avgRequestsPerDownloadingPeer)
                     {
                         continue;
                     }

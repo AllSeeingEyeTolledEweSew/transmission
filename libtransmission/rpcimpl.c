@@ -769,6 +769,16 @@ static void addField(tr_torrent* const tor, tr_info const* const inf, tr_stat co
         }
         break;
 
+    case TR_KEY_piece_max_requests_per_block:
+        {
+            tr_variant* p = tr_variantDictAddList(d, key, inf->pieceCount);
+            for (tr_piece_index_t i = 0; i < inf->pieceCount; i++)
+            {
+                tr_variantListAddInt(p, inf->pieces[i].maxRequestsPerBlock);
+            }
+        }
+        break;
+
     case TR_KEY_pieceCount:
         tr_variantDictAddInt(d, key, inf->pieceCount);
         break;
@@ -1287,6 +1297,65 @@ static char const* setPieceDLs(tr_torrent* tor, bool do_download, tr_variant* li
     return errmsg;
 }
 
+static const char* setPieceMaxRequestsPerBlock(tr_torrent* tor, tr_variant *d)
+{
+    int64_t* indexes;
+    int64_t* values;
+    size_t n;
+    tr_piece_index_t* pieces;
+    int8_t* maxRequests;
+    size_t count = 0;
+    char const* errmsg = NULL;
+
+    errmsg = dictGetSparseList(d, &indexes, &values, &n);
+
+    if (errmsg != NULL)
+    {
+        return errmsg;
+    }
+
+    if (n == 0)
+    {
+        return NULL;
+    }
+
+    pieces = tr_new0(tr_piece_index_t, n);
+    maxRequests = tr_new0(int8_t, n);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        pieces[i] = indexes[i];
+        maxRequests[i] = (int8_t)values[i];
+
+        if (pieces[i] < tor->info.pieceCount)
+        {
+            count++;
+        }
+        else
+        {
+            errmsg = "piece index out of range";
+        }
+    }
+
+    if (indexes)
+    {
+        tr_free(indexes);
+    }
+    if (values)
+    {
+        tr_free(values);
+    }
+
+    if (count)
+    {
+        tr_torrentSetPieceMaxRequests(tor, pieces, maxRequests, count);
+    }
+
+    tr_free(pieces);
+    tr_free(maxRequests);
+    return errmsg;
+}
+
 static bool findAnnounceUrl(tr_tracker_info const* t, int n, char const* url, int* pos)
 {
     bool found = false;
@@ -1565,6 +1634,11 @@ static char const* torrentSet(tr_session* session, tr_variant* args_in, tr_varia
         if (errmsg == NULL && tr_variantDictFindList(args_in, TR_KEY_pieces_wanted, &tmp_variant))
         {
             errmsg = setPieceDLs(tor, true, tmp_variant);
+        }
+
+        if (errmsg == NULL && tr_variantDictFindDict(args_in, TR_KEY_piece_max_requests_per_block, &tmp_variant))
+        {
+            errmsg = setPieceMaxRequestsPerBlock(tor, tmp_variant);
         }
 
         if (tr_variantDictFindInt(args_in, TR_KEY_downloadLimit, &tmp))

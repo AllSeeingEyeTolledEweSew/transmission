@@ -244,6 +244,7 @@ static struct tr_key_struct const my_static[] =
     Q("piece"),
     Q("piece length"),
     Q("piece-get"),
+    Q("piece-max-requests-per-block"),
     Q("piece-priorities"),
     Q("pieceCount"),
     Q("pieceSize"),

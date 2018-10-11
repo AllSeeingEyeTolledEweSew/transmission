@@ -2605,6 +2605,29 @@ void tr_torrentSetPiecePriorities(tr_torrent* tor, tr_piece_index_t const* piece
 ****
 ***/
 
+void tr_torrentSetPieceMaxRequests(tr_torrent* tor, tr_piece_index_t const* pieces, int8_t const* max_requests,
+    tr_piece_index_t n)
+{
+    TR_ASSERT(tr_isTorrent(tor));
+
+    tr_torrentLock(tor);
+
+    for (tr_piece_index_t i = 0; i < n; i++)
+    {
+        if (pieces[i] < tor->info.pieceCount)
+        {
+            tor->info.pieces[pieces[i]].maxRequestsPerBlock = max_requests[i];
+        }
+    }
+    tr_peerMgrRebuildRequests(tor);
+
+    tr_torrentUnlock(tor);
+}
+
+/***
+****
+***/
+
 tr_priority_t tr_torrentGetPriority(tr_torrent const* tor)
 {
     TR_ASSERT(tr_isTorrent(tor));

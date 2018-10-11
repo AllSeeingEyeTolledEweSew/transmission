@@ -1203,6 +1203,10 @@ void tr_torrentSetPiecePriorities(tr_torrent* tor, tr_piece_index_t const* piece
 /** @brief Set a batch of pieces to be downloaded or not. */
 void tr_torrentSetPieceDLs(tr_torrent* torrent, tr_piece_index_t const* pieces, tr_piece_index_t pieceCount, bool do_download);
 
+/** @brief Set a batch of pieces' max downloaders per block. */
+void tr_torrentSetPieceMaxRequests(tr_torrent* tor, tr_piece_index_t const* pieces, int8_t const* max_requests,
+    tr_piece_index_t n);
+
 tr_info const* tr_torrentInfo(tr_torrent const* torrent);
 
 /* Raw function to change the torrent's downloadDir field.
@@ -1602,6 +1606,7 @@ typedef struct tr_piece
     uint8_t hash[SHA_DIGEST_LENGTH]; /* pieces hash */
     tr_priority_t priority; /* TR_PRI_HIGH, _NORMAL, or _LOW */
     int8_t dnd; /* "do not download" flag */
+    int8_t maxRequestsPerBlock;
 }
 tr_piece;
 
