@@ -16,6 +16,7 @@
 #include <event2/buffer.h>
 
 #include "transmission.h"
+#include "cache.h"
 #include "completion.h"
 #include "crypto-utils.h"
 #include "error.h"
@@ -776,6 +777,25 @@ static void addField(tr_torrent* const tor, tr_info const* const inf, tr_stat co
             {
                 tr_variantListAddInt(p, inf->pieces[i].maxRequestsPerBlock);
             }
+        }
+        break;
+
+    case TR_KEY_block_in_cache:
+        if (tr_torrentHasMetadata(tor))
+        {
+            tr_bitfield block_in_cache;
+            tr_cacheGetTorrentBlockBitfield(tor->session->cache, tor, &block_in_cache);
+            size_t byte_count;
+            void* bytes = tr_bitfieldGetRaw(&block_in_cache, &byte_count);
+            tr_bitfieldDestruct(&block_in_cache);
+            char* str = tr_base64_encode(bytes, byte_count, NULL);
+            tr_free(bytes);
+            tr_variantDictAddStr(d, key, str ? str : "");
+            tr_free(str);
+        }
+        else
+        {
+            tr_variantDictAddStr(d, key, "");
         }
         break;
 
@@ -2825,6 +2845,40 @@ static char const* sessionClose(tr_session* session, tr_variant* args_in UNUSED,
     return NULL;
 }
 
+static char const* torrentFlush(tr_session* session, tr_variant* args_in, tr_variant* args_out UNUSED,
+    struct tr_rpc_idle_data* idle_data UNUSED)
+{
+    int torrentCount;
+    tr_torrent** torrents;
+    char const* errmsg = NULL;
+    int err = 0;
+
+    torrents = getTorrents(session, args_in, &torrentCount);
+
+    for (int i = 0; i < torrentCount; i++)
+    {
+        tr_torrent* tor = torrents[i];
+        int torrent_err = tr_cacheFlushTorrent(tor->session->cache, tor);
+        if (torrent_err)
+        {
+            err = torrent_err;
+        }
+    }
+
+    tr_free(torrents);
+
+    if (err == 0)
+    {
+        errmsg = NULL;
+    }
+    else
+    {
+        errmsg = tr_strerror(err);
+    }
+
+    return errmsg;
+}
+
 /***
 ****
 ***/
@@ -2848,6 +2902,7 @@ methods[] =
     { "session-stats", true, sessionStats },
     { "torrent-add", false, torrentAdd },
     { "torrent-get", true, torrentGet },
+    { "torrent-flush", true, torrentFlush },
     { "torrent-remove", true, torrentRemove },
     { "torrent-rename-path", false, torrentRenamePath },
     { "torrent-set", true, torrentSet },

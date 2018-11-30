@@ -420,6 +420,7 @@ int tr_cacheFlushDone(tr_cache* cache)
 
 int tr_cacheFlushFile(tr_cache* cache, tr_torrent* torrent, tr_file_index_t i)
 {
+    TR_ASSERT(tr_torrentHasMetadata(torrent));
     int pos;
     int err = 0;
     tr_block_index_t first;
@@ -469,4 +470,25 @@ int tr_cacheFlushTorrent(tr_cache* cache, tr_torrent* torrent)
     }
 
     return err;
+}
+
+void tr_cacheGetTorrentBlockBitfield(tr_cache* cache, tr_torrent* torrent, tr_bitfield* block_in_cache)
+{
+    tr_block_index_t n = torrent->blockCount;
+    int pos = findBlockPos(cache, torrent, 0);
+
+    tr_bitfieldConstruct(block_in_cache, n);
+
+    while (pos < tr_ptrArraySize(&cache->blocks))
+    {
+        struct cache_block const* b = tr_ptrArrayNth(&cache->blocks, pos);
+
+        if (b->tor != torrent)
+        {
+            break;
+        }
+
+        tr_bitfieldAdd(block_in_cache, b->block);
+        pos++;
+    }
 }

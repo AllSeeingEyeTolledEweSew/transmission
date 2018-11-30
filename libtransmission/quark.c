@@ -52,6 +52,7 @@ static struct tr_key_struct const my_static[] =
     Q("bind-address-ipv4"),
     Q("bind-address-ipv6"),
     Q("bitfield"),
+    Q("block-in-cache"),
     Q("blocklist-date"),
     Q("blocklist-enabled"),
     Q("blocklist-size"),
